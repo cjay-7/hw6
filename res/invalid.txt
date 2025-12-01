@@ -1,0 +1,5 @@
+create calendar --name Work
+use calendar
+create event from 2025-06-15T14:00 to 2025-06-15T15:30
+invalid command here
+exit

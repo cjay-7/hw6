@@ -1,0 +1,7 @@
+create calendar --name Work --timezone America/New_York
+use calendar --name Work
+create event "Team Meeting" from 2025-06-15T14:00 to 2025-06-15T15:30
+create event "Daily Standup" from 2025-06-01T09:00 to 2025-06-01T09:15 repeats MTWRF for 10 times
+print all events
+export cal work-calendar.csv
+exit

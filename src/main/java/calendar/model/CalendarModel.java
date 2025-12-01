@@ -1,0 +1,440 @@
+package calendar.model;
+
+import java.time.DayOfWeek;
+import java.time.LocalDate;
+import java.time.LocalDateTime;
+import java.util.ArrayList;
+import java.util.Comparator;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Map;
+import java.util.Objects;
+import java.util.Set;
+import java.util.UUID;
+import java.util.stream.Collectors;
+
+/**
+ * Implementation of a calendar model.
+ *
+ * <p>This model stores events and series, validates uniqueness,
+ * and provides query operations. It does not perform any I/O
+ * or command parsing - that is handled by other components.
+ */
+public class CalendarModel implements CalendarModelInterface {
+
+  /**
+   * Maximum number of years to generate series events into the future.
+   * Prevents infinite loops for series with no end date or far-future end dates.
+   */
+  private static final int SERIES_MAX_YEARS = 10;
+
+  private final Set<EventInterface> events;
+
+  private final Map<UUID, EventSeries> seriesConfigs;
+
+  /**
+   * Creates a new empty calendar model.
+   */
+  public CalendarModel() {
+    this.events = new HashSet<>();
+    this.seriesConfigs = new HashMap<>();
+  }
+
+  @Override
+  public boolean createEvent(EventInterface event) {
+    Objects.requireNonNull(event, "Event cannot be null");
+
+    if (events.contains(event)) {
+      return false;
+    }
+
+    events.add(event);
+    return true;
+  }
+
+  @Override
+  public boolean createEventSeries(EventSeries series) {
+    Objects.requireNonNull(series, "Series cannot be null");
+
+    List<EventInterface> occurrences = generateOccurrences(series);
+
+    for (EventInterface occurrence : occurrences) {
+      if (events.contains(occurrence)) {
+        return false;
+      }
+    }
+
+    for (EventInterface occurrence : occurrences) {
+      events.add(occurrence);
+    }
+
+    seriesConfigs.put(series.getSeriesId(), series);
+
+    return true;
+  }
+
+  @Override
+  public boolean editEvent(UUID eventId, EditSpec spec) {
+    Objects.requireNonNull(eventId, "Event ID cannot be null");
+    Objects.requireNonNull(spec, "Edit specification cannot be null");
+
+    EventInterface event = findEventById(eventId);
+    if (event == null) {
+      return false;
+    }
+
+    EventInterface modified = applyEditSpec(event, spec);
+
+    if (!modified.equals(event) && events.contains(modified)) {
+      return false;
+    }
+
+    events.remove(event);
+    events.add(modified);
+
+    return true;
+  }
+
+  @Override
+  public boolean editSeriesFrom(UUID seriesId, LocalDate fromDate, EditSpec spec) {
+    Objects.requireNonNull(seriesId, "Series ID cannot be null");
+    Objects.requireNonNull(fromDate, "From date cannot be null");
+    Objects.requireNonNull(spec, "Edit specification cannot be null");
+
+    return editSeriesInternal(seriesId, spec, fromDate, false);
+  }
+
+  @Override
+  public boolean editEntireSeries(UUID seriesId, EditSpec spec) {
+    Objects.requireNonNull(seriesId, "Series ID cannot be null");
+    Objects.requireNonNull(spec, "Edit specification cannot be null");
+
+    return editSeriesInternal(seriesId, spec, null, true);
+  }
+
+  /**
+   * Internal helper method to edit series events, eliminating duplication between
+   * editSeriesFrom() and editEntireSeries().
+   *
+   * @param seriesId           the series ID
+   * @param spec               the edit specification
+   * @param fromDate           the date to start editing from (null for entire
+   *                           series)
+   * @param removeSeriesConfig whether to remove the series config if split
+   * @return true if successful, false otherwise
+   */
+  private boolean editSeriesInternal(UUID seriesId, EditSpec spec, LocalDate fromDate,
+      boolean removeSeriesConfig) {
+    if (!seriesConfigs.containsKey(seriesId)) {
+      return false;
+    }
+
+    List<EventInterface> toEdit = findSeriesEventsToEdit(seriesId, fromDate);
+    if (toEdit.isEmpty()) {
+      return false;
+    }
+
+    boolean mustSplit = spec.getNewStart() != null;
+    List<EventInterface> modifiedEvents = buildModifiedEventsList(toEdit, spec, mustSplit);
+    if (modifiedEvents == null) {
+      return false;
+    }
+
+    replaceSeriesEvents(toEdit, modifiedEvents);
+
+    if (mustSplit && removeSeriesConfig) {
+      seriesConfigs.remove(seriesId);
+    }
+
+    return true;
+  }
+
+  /**
+   * Finds all events in a series that should be edited.
+   *
+   * @param seriesId the series ID
+   * @param fromDate the date to start from (null for all events)
+   * @return list of events to edit
+   */
+  private List<EventInterface> findSeriesEventsToEdit(UUID seriesId, LocalDate fromDate) {
+    return events.stream()
+        .filter(e -> e.getSeriesId().isPresent())
+        .filter(e -> e.getSeriesId().get().equals(seriesId))
+        .filter(e -> fromDate == null || !e.getStartDateTime().toLocalDate().isBefore(fromDate))
+        .collect(Collectors.toList());
+  }
+
+  /**
+   * Builds a list of modified events from the original events and edit spec.
+   *
+   * @param toEdit    the events to edit
+   * @param spec      the edit specification
+   * @param mustSplit whether to break series link
+   * @return list of modified events, or null if a duplicate would be created
+   */
+  private List<EventInterface> buildModifiedEventsList(List<EventInterface> toEdit,
+      EditSpec spec, boolean mustSplit) {
+    List<EventInterface> modifiedEvents = new ArrayList<>();
+    for (EventInterface event : toEdit) {
+      EditSpec eventSpec = createAdjustedEditSpec(spec, event);
+      EventInterface modified = applyEditSpec(event, eventSpec);
+
+      if (mustSplit) {
+        modified = breakSeriesLink(modified);
+      }
+
+      if (wouldCreateDuplicate(event, modified)) {
+        return null;
+      }
+
+      modifiedEvents.add(modified);
+    }
+    return modifiedEvents;
+  }
+
+  /**
+   * Creates an adjusted edit spec for a specific series event.
+   * When changing start time for series events, adjusts the time while preserving
+   * the date.
+   *
+   * @param spec  the original edit specification
+   * @param event the event being edited
+   * @return adjusted edit spec for this event
+   */
+  private EditSpec createAdjustedEditSpec(EditSpec spec, EventInterface event) {
+    if (spec.getNewStart() != null && spec.getNewEnd() == null) {
+      java.time.LocalTime newTime = spec.getNewStart().toLocalTime();
+      java.time.LocalDate eventDate = event.getStartDateTime().toLocalDate();
+      LocalDateTime adjustedStart = LocalDateTime.of(eventDate, newTime);
+      return new EditSpec(
+          spec.getNewSubject(),
+          adjustedStart,
+          null,
+          spec.getNewDescription(),
+          spec.getNewLocation(),
+          spec.getNewStatus());
+    }
+    return spec;
+  }
+
+  /**
+   * Creates a copy of an event without its series link.
+   *
+   * @param event the event to break from its series
+   * @return new event without series ID
+   */
+  private EventInterface breakSeriesLink(EventInterface event) {
+    return new Event(
+        event.getSubject(),
+        event.getStartDateTime(),
+        event.getEndDateTime(),
+        event.getDescription().orElse(null),
+        event.getLocation().orElse(null),
+        event.isPrivate(),
+        event.getId(),
+        null);
+  }
+
+  /**
+   * Checks if modifying an event would create a duplicate.
+   *
+   * @param original the original event
+   * @param modified the modified event
+   * @return true if modification would create duplicate
+   */
+  private boolean wouldCreateDuplicate(EventInterface original, EventInterface modified) {
+    return !modified.equals(original) && events.contains(modified);
+  }
+
+  /**
+   * Replaces original events with their modified versions.
+   *
+   * @param originals the original events
+   * @param modified  the modified events
+   */
+  private void replaceSeriesEvents(List<EventInterface> originals,
+      List<EventInterface> modified) {
+    for (int i = 0; i < originals.size(); i++) {
+      events.remove(originals.get(i));
+      events.add(modified.get(i));
+    }
+  }
+
+  @Override
+  public List<EventInterface> getEventsOnDate(LocalDate date) {
+    Objects.requireNonNull(date, "Date cannot be null");
+
+    return events.stream()
+        .filter(e -> {
+          LocalDate eventStart = e.getStartDateTime().toLocalDate();
+          LocalDate eventEnd = e.getEndDateTime().toLocalDate();
+          return !date.isBefore(eventStart) && !date.isAfter(eventEnd);
+        })
+        .sorted((e1, e2) -> e1.getStartDateTime().compareTo(e2.getStartDateTime()))
+        .collect(Collectors.toList());
+  }
+
+  @Override
+  public List<EventInterface> getAllEvents() {
+    return events.stream()
+        .sorted(Comparator.comparing(EventInterface::getStartDateTime)
+            .thenComparing(EventInterface::getEndDateTime))
+        .collect(Collectors.toList());
+  }
+
+  @Override
+  public List<EventInterface> getEventsInRange(LocalDateTime startDateTime,
+      LocalDateTime endDateTime) {
+    Objects.requireNonNull(startDateTime, "Start date-time cannot be null");
+    Objects.requireNonNull(endDateTime, "End date-time cannot be null");
+
+    return events.stream()
+        .filter(e -> e.getStartDateTime().isBefore(endDateTime)
+            && e.getEndDateTime().isAfter(startDateTime))
+        .sorted((e1, e2) -> e1.getStartDateTime().compareTo(e2.getStartDateTime()))
+        .collect(Collectors.toList());
+  }
+
+  @Override
+  public boolean isBusy(LocalDateTime dateTime) {
+    Objects.requireNonNull(dateTime, "Date-time cannot be null");
+
+    return events.stream()
+        .anyMatch(e -> !e.getStartDateTime().isAfter(dateTime)
+            && e.getEndDateTime().isAfter(dateTime));
+  }
+
+  @Override
+  public EventInterface findEventById(UUID eventId) {
+    Objects.requireNonNull(eventId, "Event ID cannot be null");
+
+    return events.stream()
+        .filter(e -> e.getId().equals(eventId))
+        .findFirst()
+        .orElse(null);
+  }
+
+  @Override
+  public EventInterface findEventByProperties(String subject, LocalDateTime startDateTime,
+      LocalDateTime endDateTime) {
+    Objects.requireNonNull(subject, "Subject cannot be null");
+    Objects.requireNonNull(startDateTime, "Start date-time cannot be null");
+    Objects.requireNonNull(endDateTime, "End date-time cannot be null");
+
+    return events.stream()
+        .filter(e -> e.getSubject().equals(subject.trim()))
+        .filter(e -> e.getStartDateTime().equals(startDateTime))
+        .filter(e -> e.getEndDateTime().equals(endDateTime))
+        .findFirst()
+        .orElse(null);
+  }
+
+  /**
+   * Generates all occurrences for an event series.
+   *
+   * @param series the series configuration
+   * @return list of all event occurrences
+   */
+  private List<EventInterface> generateOccurrences(EventSeries series) {
+    List<EventInterface> occurrences = new ArrayList<>();
+
+    LocalDateTime startTime = series.getTemplate().getStartDateTime();
+    LocalDateTime endTime = series.getTemplate().getEndDateTime();
+
+    LocalDate templateDate = startTime.toLocalDate();
+    int startHour = startTime.getHour();
+    int startMinute = startTime.getMinute();
+
+    int durationMinutes = (int) java.time.Duration.between(startTime, endTime).toMinutes();
+
+    LocalDate currentDate = templateDate;
+    Set<DayOfWeek> weekdays = series.getWeekdays();
+    int occurrenceCount = 0;
+
+    while (true) {
+
+      if (weekdays.contains(currentDate.getDayOfWeek())) {
+        LocalDateTime eventStart = LocalDateTime.of(currentDate,
+            java.time.LocalTime.of(startHour, startMinute));
+        LocalDateTime eventEnd = eventStart.plusMinutes(durationMinutes);
+
+        EventInterface occurrence = new Event(
+            series.getTemplate().getSubject(),
+            eventStart,
+            eventEnd,
+            series.getTemplate().getDescription().orElse(null),
+            series.getTemplate().getLocation().orElse(null),
+            series.getTemplate().isPrivate(),
+            UUID.randomUUID(),
+            series.getSeriesId());
+
+        occurrences.add(occurrence);
+        occurrenceCount++;
+
+        if (series.getOccurrences() != null && occurrenceCount >= series.getOccurrences()) {
+          break;
+        }
+      }
+
+      if (series.usesEndDate() && currentDate.isAfter(series.getEndDate())) {
+        break;
+      }
+
+      currentDate = currentDate.plusDays(1);
+
+      if (currentDate.isAfter(templateDate.plusYears(SERIES_MAX_YEARS))) {
+        break;
+      }
+    }
+
+    return occurrences;
+  }
+
+  /**
+   * Applies an edit specification to an event.
+   *
+   * @param event the event to modify
+   * @param spec  the edit specification
+   * @return a new event with modifications applied
+   */
+  private EventInterface applyEditSpec(EventInterface event, EditSpec spec) {
+    String newSubject = (spec.getNewSubject() != null)
+        ? spec.getNewSubject()
+        : event.getSubject();
+
+    LocalDateTime newStart = (spec.getNewStart() != null)
+        ? spec.getNewStart()
+        : event.getStartDateTime();
+
+    LocalDateTime newEnd;
+    if (spec.getNewEnd() != null) {
+
+      newEnd = spec.getNewEnd();
+    } else if (spec.getNewStart() != null && spec.getNewEnd() == null) {
+
+      java.time.Duration duration = java.time.Duration.between(
+          event.getStartDateTime(), event.getEndDateTime());
+      newEnd = newStart.plus(duration);
+    } else {
+
+      newEnd = event.getEndDateTime();
+    }
+
+    String newDescription = (spec.getNewDescription() != null)
+        ? spec.getNewDescription()
+        : event.getDescription().orElse(null);
+
+    String newLocation = (spec.getNewLocation() != null)
+        ? spec.getNewLocation()
+        : event.getLocation().orElse(null);
+
+    Boolean newIsPrivate = (spec.getNewStatus() != null)
+        ? spec.getNewStatus().isPrivate()
+        : event.isPrivate() ? Boolean.TRUE : Boolean.FALSE;
+
+    return event.withModifications(
+        newSubject, newStart, newEnd, newDescription, newLocation, newIsPrivate,
+        event.getSeriesId().orElse(null));
+  }
+}

@@ -1,0 +1,471 @@
+package calendar.view;
+
+import java.awt.BorderLayout;
+import java.awt.Color;
+import java.awt.Dimension;
+import java.awt.FlowLayout;
+import java.awt.Font;
+import java.time.DayOfWeek;
+import java.time.LocalDate;
+import java.time.LocalDateTime;
+import java.time.LocalTime;
+import java.time.format.DateTimeFormatter;
+import java.time.format.DateTimeParseException;
+import java.util.HashSet;
+import java.util.Set;
+import javax.swing.BorderFactory;
+import javax.swing.Box;
+import javax.swing.BoxLayout;
+import javax.swing.ButtonGroup;
+import javax.swing.JButton;
+import javax.swing.JCheckBox;
+import javax.swing.JDialog;
+import javax.swing.JFrame;
+import javax.swing.JLabel;
+import javax.swing.JOptionPane;
+import javax.swing.JPanel;
+import javax.swing.JRadioButton;
+import javax.swing.JTextArea;
+import javax.swing.JTextField;
+
+/**
+ * Dialog for creating a recurring event series.
+ */
+public class CreateEventSeriesDialog extends JDialog {
+  private static final DateTimeFormatter DATE_FORMAT = DateTimeFormatter.ofPattern("yyyy-MM-dd");
+  private static final DateTimeFormatter TIME_FORMAT = DateTimeFormatter.ofPattern("HH:mm");
+
+  private JTextField subjectField;
+  private JTextField startDateField;
+  private JTextField startTimeField;
+  private JTextField endTimeField;
+  private JTextField locationField;
+  private JTextArea descriptionArea;
+  private JCheckBox privateCheckbox;
+
+  private JCheckBox monCheckbox;
+  private JCheckBox tueCheckbox;
+  private JCheckBox wedCheckbox;
+  private JCheckBox thuCheckbox;
+  private JCheckBox friCheckbox;
+  private JCheckBox satCheckbox;
+  private JCheckBox sunCheckbox;
+
+  private JRadioButton endDateRadio;
+  private JRadioButton occurrencesRadio;
+  private JTextField endDateField;
+  private JTextField occurrencesField;
+
+  private boolean confirmed;
+  private String subject;
+  private LocalDateTime startDateTime;
+  private LocalDateTime endDateTime;
+  private String location;
+  private String description;
+  private boolean isPrivate;
+  private Set<DayOfWeek> weekdays;
+  private LocalDate seriesEndDate;
+  private Integer occurrences;
+
+  /**
+   * Constructor.
+   *
+   * @param parent the parent frame
+   * @param defaultDate the default date
+   */
+  public CreateEventSeriesDialog(JFrame parent, LocalDate defaultDate) {
+    super(parent, "Create Recurring Series", true);
+    this.confirmed = false;
+
+    setSize(600, 650);
+    setResizable(false);
+    setLayout(new BorderLayout());
+
+    JPanel mainPanel = new JPanel();
+    mainPanel.setLayout(new BoxLayout(mainPanel, BoxLayout.Y_AXIS));
+    mainPanel.setBorder(BorderFactory.createEmptyBorder(15, 25, 15, 25));
+
+    
+    JLabel titleLabel = new JLabel("Create Recurring Event Series");
+    titleLabel.setFont(new Font("SansSerif", Font.BOLD, 16));
+    titleLabel.setAlignmentX(LEFT_ALIGNMENT);
+    mainPanel.add(titleLabel);
+    mainPanel.add(Box.createVerticalStrut(12));
+
+    
+    addLabeledField(mainPanel, "Subject (required):", subjectField = new JTextField(30), true);
+
+    
+    startDateField = new JTextField(12);
+    if (defaultDate != null) {
+      startDateField.setText(defaultDate.format(DATE_FORMAT));
+    } else {
+      startDateField.setText(LocalDate.now().format(DATE_FORMAT));
+    }
+    addLabeledField(mainPanel, "Start Date (yyyy-MM-dd):", startDateField, false);
+
+    
+    JPanel timePanel = new JPanel(new FlowLayout(FlowLayout.LEFT, 15, 0));
+    timePanel.setAlignmentX(LEFT_ALIGNMENT);
+    timePanel.setMaximumSize(new Dimension(550, 50));
+
+    startTimeField = new JTextField(6);
+    JPanel startTimePanel = createTimeFieldPanel("Start (HH:mm):",
+        startTimeField, "09:00");
+    endTimeField = new JTextField(6);
+    JPanel endTimePanel = createTimeFieldPanel("End (HH:mm):",
+        endTimeField, "10:00");
+
+    timePanel.add(startTimePanel);
+    timePanel.add(endTimePanel);
+    mainPanel.add(timePanel);
+    mainPanel.add(Box.createVerticalStrut(8));
+
+    
+    addLabeledField(mainPanel, "Location:", locationField = new JTextField(30), false);
+
+    
+    JLabel descLabel = new JLabel("Description:");
+    descLabel.setFont(new Font("SansSerif", Font.PLAIN, 12));
+    descLabel.setAlignmentX(LEFT_ALIGNMENT);
+    mainPanel.add(descLabel);
+    mainPanel.add(Box.createVerticalStrut(2));
+
+    descriptionArea = new JTextArea(2, 30);
+    descriptionArea.setLineWrap(true);
+    descriptionArea.setFont(new Font("SansSerif", Font.PLAIN, 12));
+    descriptionArea.setBorder(BorderFactory.createLineBorder(Color.GRAY));
+    descriptionArea.setAlignmentX(LEFT_ALIGNMENT);
+    descriptionArea.setMaximumSize(new Dimension(540, 40));
+    mainPanel.add(descriptionArea);
+    mainPanel.add(Box.createVerticalStrut(8));
+
+    
+    privateCheckbox = new JCheckBox("Private");
+    privateCheckbox.setFont(new Font("SansSerif", Font.PLAIN, 12));
+    privateCheckbox.setAlignmentX(LEFT_ALIGNMENT);
+    mainPanel.add(privateCheckbox);
+    mainPanel.add(Box.createVerticalStrut(12));
+
+    
+    JLabel weekdayLabel = new JLabel("Repeat on (select at least one):");
+    weekdayLabel.setFont(new Font("SansSerif", Font.BOLD, 12));
+    weekdayLabel.setForeground(new Color(200, 0, 0));
+    weekdayLabel.setAlignmentX(LEFT_ALIGNMENT);
+    mainPanel.add(weekdayLabel);
+    mainPanel.add(Box.createVerticalStrut(5));
+
+    JPanel weekdayPanel = new JPanel(new FlowLayout(FlowLayout.LEFT, 8, 3));
+    weekdayPanel.setAlignmentX(LEFT_ALIGNMENT);
+    weekdayPanel.setMaximumSize(new Dimension(550, 35));
+
+    Font cbFont = new Font("SansSerif", Font.PLAIN, 12);
+    sunCheckbox = new JCheckBox("Sun");
+    sunCheckbox.setFont(cbFont);
+    monCheckbox = new JCheckBox("Mon");
+    monCheckbox.setFont(cbFont);
+    tueCheckbox = new JCheckBox("Tue");
+    tueCheckbox.setFont(cbFont);
+    wedCheckbox = new JCheckBox("Wed");
+    wedCheckbox.setFont(cbFont);
+    thuCheckbox = new JCheckBox("Thu");
+    thuCheckbox.setFont(cbFont);
+    friCheckbox = new JCheckBox("Fri");
+    friCheckbox.setFont(cbFont);
+    satCheckbox = new JCheckBox("Sat");
+    satCheckbox.setFont(cbFont);
+
+    weekdayPanel.add(sunCheckbox);
+    weekdayPanel.add(monCheckbox);
+    weekdayPanel.add(tueCheckbox);
+    weekdayPanel.add(wedCheckbox);
+    weekdayPanel.add(thuCheckbox);
+    weekdayPanel.add(friCheckbox);
+    weekdayPanel.add(satCheckbox);
+
+    mainPanel.add(weekdayPanel);
+    mainPanel.add(Box.createVerticalStrut(5));
+
+    
+    JPanel quickPanel = new JPanel(new FlowLayout(FlowLayout.LEFT, 8, 0));
+    quickPanel.setAlignmentX(LEFT_ALIGNMENT);
+    quickPanel.setMaximumSize(new Dimension(550, 30));
+
+    JButton weekdaysBtn = new JButton("Weekdays");
+    weekdaysBtn.setFont(new Font("SansSerif", Font.PLAIN, 11));
+    weekdaysBtn.addActionListener(e -> {
+      monCheckbox.setSelected(true);
+      tueCheckbox.setSelected(true);
+      wedCheckbox.setSelected(true);
+      thuCheckbox.setSelected(true);
+      friCheckbox.setSelected(true);
+      satCheckbox.setSelected(false);
+      sunCheckbox.setSelected(false);
+    });
+
+    JButton weekendBtn = new JButton("Weekend");
+    weekendBtn.setFont(new Font("SansSerif", Font.PLAIN, 11));
+    weekendBtn.addActionListener(e -> {
+      satCheckbox.setSelected(true);
+      sunCheckbox.setSelected(true);
+      monCheckbox.setSelected(false);
+      tueCheckbox.setSelected(false);
+      wedCheckbox.setSelected(false);
+      thuCheckbox.setSelected(false);
+      friCheckbox.setSelected(false);
+    });
+
+    quickPanel.add(weekdaysBtn);
+    quickPanel.add(weekendBtn);
+    mainPanel.add(quickPanel);
+    mainPanel.add(Box.createVerticalStrut(12));
+
+    
+    JLabel endLabel = new JLabel("Series ends:");
+    endLabel.setFont(new Font("SansSerif", Font.BOLD, 12));
+    endLabel.setForeground(new Color(200, 0, 0));
+    endLabel.setAlignmentX(LEFT_ALIGNMENT);
+    mainPanel.add(endLabel);
+    mainPanel.add(Box.createVerticalStrut(5));
+
+    final ButtonGroup endGroup = new ButtonGroup();
+    endDateRadio = new JRadioButton("On date:");
+    occurrencesRadio = new JRadioButton("After # events:");
+    endDateRadio.setFont(new Font("SansSerif", Font.PLAIN, 12));
+    occurrencesRadio.setFont(new Font("SansSerif", Font.PLAIN, 12));
+    endGroup.add(endDateRadio);
+    endGroup.add(occurrencesRadio);
+    endDateRadio.setSelected(true);
+
+    JPanel endDatePanel = new JPanel(new FlowLayout(FlowLayout.LEFT, 5, 0));
+    endDatePanel.setAlignmentX(LEFT_ALIGNMENT);
+    endDatePanel.setMaximumSize(new Dimension(550, 30));
+    endDatePanel.add(endDateRadio);
+    endDateField = new JTextField(12);
+    endDateField.setFont(new Font("SansSerif", Font.PLAIN, 12));
+    endDateField.setText(LocalDate.now().plusMonths(3).format(DATE_FORMAT));
+    endDatePanel.add(endDateField);
+    mainPanel.add(endDatePanel);
+
+    JPanel occPanel = new JPanel(new FlowLayout(FlowLayout.LEFT, 5, 0));
+    occPanel.setAlignmentX(LEFT_ALIGNMENT);
+    occPanel.setMaximumSize(new Dimension(550, 30));
+    occPanel.add(occurrencesRadio);
+    occurrencesField = new JTextField(6);
+    occurrencesField.setFont(new Font("SansSerif", Font.PLAIN, 12));
+    occurrencesField.setText("10");
+    occPanel.add(occurrencesField);
+    mainPanel.add(occPanel);
+
+    endDateRadio.addActionListener(e -> {
+      endDateField.setEnabled(true);
+      occurrencesField.setEnabled(false);
+    });
+    occurrencesRadio.addActionListener(e -> {
+      endDateField.setEnabled(false);
+      occurrencesField.setEnabled(true);
+    });
+    occurrencesField.setEnabled(false);
+
+    mainPanel.add(Box.createVerticalStrut(15));
+
+    
+    final JPanel buttonPanel = new JPanel(new FlowLayout(FlowLayout.CENTER, 20, 0));
+
+    JButton createButton = new JButton("Create Series");
+    createButton.setPreferredSize(new Dimension(170, 40));
+    createButton.setFont(new Font("SansSerif", Font.BOLD, 14));
+    createButton.setBackground(new Color(52, 168, 83));
+    createButton.setForeground(Color.BLACK);
+    createButton.setFocusPainted(false);
+    createButton.setOpaque(true);
+    createButton.setBorderPainted(false);
+    createButton.addActionListener(e -> handleCreate());
+    buttonPanel.add(createButton);
+
+    JButton cancelButton = new JButton("Cancel");
+    cancelButton.setPreferredSize(new Dimension(170, 40));
+    cancelButton.setFont(new Font("SansSerif", Font.BOLD, 14));
+    cancelButton.setBackground(new Color(234, 67, 53));
+    cancelButton.setForeground(Color.BLACK);
+    cancelButton.setFocusPainted(false);
+    cancelButton.setOpaque(true);
+    cancelButton.setBorderPainted(false);
+    cancelButton.addActionListener(e -> {
+      confirmed = false;
+      dispose();
+    });
+    buttonPanel.add(cancelButton);
+
+    mainPanel.add(buttonPanel);
+
+    add(mainPanel, BorderLayout.CENTER);
+    setLocationRelativeTo(parent);
+  }
+
+  private JPanel createTimeFieldPanel(String label, JTextField field, String defaultVal) {
+    JPanel panel = new JPanel();
+    panel.setLayout(new BoxLayout(panel, BoxLayout.Y_AXIS));
+    
+    JLabel lbl = new JLabel(label);
+    lbl.setFont(new Font("SansSerif", Font.PLAIN, 12));
+    panel.add(lbl);
+    panel.add(Box.createVerticalStrut(2));
+    
+    field.setText(defaultVal);
+    field.setFont(new Font("SansSerif", Font.PLAIN, 12));
+    panel.add(field);
+    
+    return panel;
+  }
+
+  private void addLabeledField(JPanel panel, String labelText, JTextField field, boolean required) {
+    JLabel label = new JLabel(labelText);
+    label.setFont(new Font("SansSerif", Font.PLAIN, 12));
+    if (required) {
+      label.setForeground(new Color(200, 0, 0));
+    }
+    label.setAlignmentX(LEFT_ALIGNMENT);
+    panel.add(label);
+    panel.add(Box.createVerticalStrut(2));
+
+    field.setFont(new Font("SansSerif", Font.PLAIN, 12));
+    field.setMaximumSize(new Dimension(540, 26));
+    field.setAlignmentX(LEFT_ALIGNMENT);
+    panel.add(field);
+    panel.add(Box.createVerticalStrut(8));
+  }
+
+  private void handleCreate() {
+    try {
+      this.subject = subjectField.getText().trim();
+      if (subject.isEmpty()) {
+        showError("Subject is required");
+        return;
+      }
+
+      LocalDate startDate = LocalDate.parse(startDateField.getText().trim(), DATE_FORMAT);
+      LocalTime startTime = LocalTime.parse(startTimeField.getText().trim(), TIME_FORMAT);
+      LocalTime endTime = LocalTime.parse(endTimeField.getText().trim(), TIME_FORMAT);
+
+      this.startDateTime = LocalDateTime.of(startDate, startTime);
+      this.endDateTime = LocalDateTime.of(startDate, endTime);
+
+      if (!endDateTime.isAfter(startDateTime)) {
+        showError("End time must be after start time");
+        return;
+      }
+
+      String loc = locationField.getText().trim();
+      this.location = loc.isEmpty() ? null : loc;
+
+      String desc = descriptionArea.getText().trim();
+      this.description = desc.isEmpty() ? null : desc;
+
+      this.isPrivate = privateCheckbox.isSelected();
+
+      this.weekdays = new HashSet<>();
+      if (sunCheckbox.isSelected()) {
+        weekdays.add(DayOfWeek.SUNDAY);
+      }
+      if (monCheckbox.isSelected()) {
+        weekdays.add(DayOfWeek.MONDAY);
+      }
+      if (tueCheckbox.isSelected()) {
+        weekdays.add(DayOfWeek.TUESDAY);
+      }
+      if (wedCheckbox.isSelected()) {
+        weekdays.add(DayOfWeek.WEDNESDAY);
+      }
+      if (thuCheckbox.isSelected()) {
+        weekdays.add(DayOfWeek.THURSDAY);
+      }
+      if (friCheckbox.isSelected()) {
+        weekdays.add(DayOfWeek.FRIDAY);
+      }
+      if (satCheckbox.isSelected()) {
+        weekdays.add(DayOfWeek.SATURDAY);
+      }
+
+      if (weekdays.isEmpty()) {
+        showError("Please select at least one weekday");
+        return;
+      }
+
+      if (endDateRadio.isSelected()) {
+        this.seriesEndDate = LocalDate.parse(endDateField.getText().trim(), DATE_FORMAT);
+        this.occurrences = null;
+        if (!seriesEndDate.isAfter(startDate)) {
+          showError("End date must be after start date");
+          return;
+        }
+      } else {
+        this.seriesEndDate = null;
+        this.occurrences = Integer.parseInt(occurrencesField.getText().trim());
+        if (occurrences <= 0) {
+          showError("Occurrences must be positive");
+          return;
+        }
+      }
+
+      this.confirmed = true;
+      dispose();
+
+    } catch (DateTimeParseException e) {
+      showError("Invalid date or time format.\n\nDate: yyyy-MM-dd\nTime: HH:mm");
+    } catch (NumberFormatException e) {
+      showError("Invalid number of occurrences");
+    }
+  }
+
+  private void showError(String message) {
+    JOptionPane.showMessageDialog(this, message, "Error", JOptionPane.ERROR_MESSAGE);
+  }
+
+  /**
+   * Shows the dialog.
+   *
+   * @return true if confirmed, false otherwise
+   */
+  public boolean showDialog() {
+    setVisible(true);
+    return confirmed;
+  }
+
+
+  public String getSubject() {
+    return subject;
+  }
+
+  public LocalDateTime getStartDateTime() {
+    return startDateTime;
+  }
+
+  public LocalDateTime getEndDateTime() {
+    return endDateTime;
+  }
+
+  public String getEventLocation() {
+    return location;
+  }
+
+  public String getDescription() {
+    return description;
+  }
+
+  public boolean isPrivate() {
+    return isPrivate;
+  }
+
+  public Set<DayOfWeek> getWeekdays() {
+    return weekdays;
+  }
+
+  public LocalDate getSeriesEndDate() {
+    return seriesEndDate;
+  }
+
+  public Integer getOccurrences() {
+    return occurrences;
+  }
+}

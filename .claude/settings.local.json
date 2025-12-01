@@ -1,0 +1,19 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(find:*)",
+      "Bash(./gradlew build:*)",
+      "Bash(./gradlew compileJava:*)",
+      "Bash(timeout 5 ./gradlew run:*)",
+      "Bash(./gradlew jar:*)",
+      "Bash(./gradlew clean build:*)",
+      "Bash(./gradlew checkstyleMain:*)",
+      "Bash(./gradlew test:*)",
+      "Bash(cat:*)",
+      "Bash(perl:*)",
+      "Bash(./gradlew pitest:*)"
+    ],
+    "deny": [],
+    "ask": []
+  }
+}
